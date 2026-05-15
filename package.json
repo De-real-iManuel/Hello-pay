@@ -1,0 +1,29 @@
+{
+  "name": "autonomous-bounty-agent",
+  "version": "1.0.0",
+  "description": "Autonomous AI research pipeline agent on Solana using SAP, AceDataCloud, and x402 micropayments",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:property": "vitest run tests/property",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "dotenv": "^16.4.0",
+    "zod": "^3.23.0",
+    "@oobe-protocol-labs/synapse-sap-sdk": "*",
+    "@acedatacloud/sdk": "*",
+    "@acedatacloud/x402-client": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "fast-check": "^3.19.0",
+    "tsx": "^4.11.0",
+    "@types/node": "^20.0.0"
+  }
+}
