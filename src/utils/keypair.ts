@@ -1,5 +1,5 @@
 /**
- * Keypair loading utility for the Autonomous Bounty Agent.
+ * Keypair loading utility for Hello-pay.
  * 
  * Safely loads and validates Solana keypairs from JSON files without
  * exposing raw key material in error messages or logs.

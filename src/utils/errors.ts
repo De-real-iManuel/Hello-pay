@@ -1,5 +1,5 @@
 /**
- * Custom error classes for the Autonomous Bounty Agent.
+ * Custom error classes for Hello-pay.
  * Each error extends Error with a typed `code` property for programmatic handling.
  */
 

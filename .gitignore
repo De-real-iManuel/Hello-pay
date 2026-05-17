@@ -1,3 +1,29 @@
-/.env.example
-/.kiro
-/node_modules
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment & secrets — NEVER commit these
+.env
+*.env
+wallet.json
+*.json.key
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Kiro specs (internal tooling)
+.kiro/
+
+# Test coverage
+coverage/

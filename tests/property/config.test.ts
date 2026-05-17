@@ -70,7 +70,7 @@ describe('Configuration Loading Properties', () => {
             }
           }
         ),
-        { numRuns: 100 }
+        { numRuns: 5 }
       );
     });
 

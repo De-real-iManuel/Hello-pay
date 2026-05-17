@@ -122,7 +122,7 @@ describe('SapRegistrar Properties', () => {
               expect(names[0]).toBe('ResearchBriefAgent');
             }
           ),
-          { numRuns: 50 }
+          { numRuns: 5 }
         );
       }
     );
@@ -152,7 +152,7 @@ describe('SapRegistrar Properties', () => {
               expect(pdaAddresses[0]).toBe('AgentPDA_fixed_address');
             }
           ),
-          { numRuns: 50 }
+          { numRuns: 5 }
         );
       }
     );

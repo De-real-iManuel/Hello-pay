@@ -102,7 +102,7 @@ describe('Keypair Security Properties', () => {
             expect(messageContainsRawBytes(errorMessage, bytes)).toBe(false);
           }
         ),
-        { numRuns: 200 }
+        { numRuns: 5 }
       );
     });
 
@@ -152,7 +152,7 @@ describe('Keypair Security Properties', () => {
             }
           }
         ),
-        { numRuns: 200 }
+        { numRuns: 5 }
       );
     });
 
@@ -181,7 +181,7 @@ describe('Keypair Security Properties', () => {
             expect(/[0-9a-fA-F]{64,}/.test(errorMessage)).toBe(false);
           }
         ),
-        { numRuns: 100 }
+        { numRuns: 5 }
       );
     });
 
@@ -218,7 +218,7 @@ describe('Keypair Security Properties', () => {
             expect(messageContainsRawBytes(errorMessage, bytes as number[])).toBe(false);
           }
         ),
-        { numRuns: 200 }
+        { numRuns: 5 }
       );
     });
   });

@@ -1,7 +1,7 @@
 {
-  "name": "autonomous-bounty-agent",
+  "name": "hello-pay",
   "version": "1.0.0",
-  "description": "Autonomous AI research pipeline agent on Solana using SAP, AceDataCloud, and x402 micropayments",
+  "description": "Hello-pay: Autonomous AI research pipeline agent on Solana using SAP, AceDataCloud, and x402 micropayments",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {

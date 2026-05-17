@@ -1,5 +1,5 @@
 /**
- * Configuration loading and validation for the Autonomous Bounty Agent.
+ * Configuration loading and validation for Hello-pay.
  * 
  * Loads all required environment variables using Zod for validation and
  * throws ConfigurationError listing ALL missing variables when any required
