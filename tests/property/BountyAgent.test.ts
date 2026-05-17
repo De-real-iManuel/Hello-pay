@@ -128,7 +128,7 @@ vi.mock("../../src/agent/ResultPersister.js", () => ({
 // ---------------------------------------------------------------------------
 // Import BountyAgent AFTER mocks are set up
 // ---------------------------------------------------------------------------
-import { BountyAgent } from "../../src/agent/BountyAgent.js";
+import { BountyAgent, assembleBrief } from "../../src/agent/BountyAgent.js";
 import { PaymentError, InsufficientSolError, InsufficientUsdcError } from "../../src/utils/errors.js";
 
 // ---------------------------------------------------------------------------
@@ -929,6 +929,623 @@ describe("Property 21: USDC Balance Pre-flight", () => {
       // A missing token account is treated as 0 USDC, which is below threshold
       expect(thrownError).toBeInstanceOf(InsufficientUsdcError);
       expect((thrownError as InsufficientUsdcError).code).toBe("INSUFFICIENT_USDC");
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Property 15: ResearchBrief Assembly Completeness
+// ---------------------------------------------------------------------------
+
+/**
+ * Arbitraries for generating valid PipelineState objects.
+ *
+ * assembleBrief() is a pure function — no mocks needed. We generate
+ * structurally valid PipelineState objects and assert that the returned
+ * ResearchBrief satisfies all data-integrity requirements.
+ */
+
+/** UUID v4 regex */
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Arbitrary that generates a non-empty string of printable ASCII characters */
+const nonEmptyStringArb = fc.string({ minLength: 1, maxLength: 80 }).filter(
+  (s) => s.trim().length > 0
+);
+
+/** Arbitrary for a valid HTTPS URL */
+const httpsUrlArb = fc
+  .tuple(
+    fc.stringMatching(/^[a-z0-9-]{3,20}$/),
+    fc.stringMatching(/^[a-z0-9/-]{1,40}$/)
+  )
+  .map(([host, path]) => `https://${host}.example.com/${path}`);
+
+/** Arbitrary for a single SearchResult with all required fields non-empty */
+const searchResultArb = fc.record({
+  title: nonEmptyStringArb,
+  url: httpsUrlArb,
+  snippet: nonEmptyStringArb,
+});
+
+/** Arbitrary for a single PaymentRecord */
+const paymentServiceArb = fc.constantFrom(
+  "sentinel" as const,
+  "acedata-search" as const,
+  "acedata-llm" as const,
+  "acedata-image" as const
+);
+
+const paymentRecordArb = fc.record({
+  service: paymentServiceArb,
+  network: fc.constant("solana" as const),
+  amountUsdc: fc
+    .float({ min: Math.fround(0.001), max: Math.fround(1.0), noNaN: true })
+    .map((n) => n.toFixed(6)),
+  txHash: nonEmptyStringArb,
+  settledAt: fc.integer({ min: 1_000_000_000, max: 9_999_999_999 }),
+});
+
+/** Exactly 4 payment records — one per required service */
+const fourPaymentsArb = fc.tuple(
+  fc.record({ ...paymentRecordArb.model, service: fc.constant("sentinel" as const) }),
+  fc.record({ ...paymentRecordArb.model, service: fc.constant("acedata-search" as const) }),
+  fc.record({ ...paymentRecordArb.model, service: fc.constant("acedata-llm" as const) }),
+  fc.record({ ...paymentRecordArb.model, service: fc.constant("acedata-image" as const) })
+).map(([a, b, c, d]) => [a, b, c, d]);
+
+/**
+ * Build a valid PipelineState whose `results` field has all required fields
+ * populated so that assembleBrief() succeeds.
+ */
+const validPipelineStateArb = fc
+  .tuple(
+    fc.uuid(),                                                    // id
+    nonEmptyStringArb,                                            // topic
+    fc.integer({ min: 1_000_000_000, max: 9_999_999_999 }),      // createdAt (Unix seconds)
+    fc.float({ min: Math.fround(0.01), max: Math.fround(10_000), noNaN: true }),            // solPrice > 0
+    fc.array(searchResultArb, { minLength: 1, maxLength: 10 }),   // searchResults (non-empty)
+    fc.string({ minLength: 1, maxLength: 500 }).filter((s) => s.trim().length > 0), // analysis
+    httpsUrlArb,                                                  // imageUrl
+    fourPaymentsArb                                               // exactly 4 payments
+  )
+  .map(([id, topic, createdAt, solPrice, searchResults, analysis, imageUrl, payments]) => ({
+    runId: id,
+    topic,
+    stage: "persist" as const,
+    startedAt: createdAt * 1000,
+    results: {
+      id,
+      topic,
+      createdAt,
+      solPrice,
+      searchResults,
+      analysis,
+      imageUrl,
+      payments,
+    },
+    errors: [],
+  }));
+
+describe("Property 15: ResearchBrief Assembly Completeness", () => {
+  it(
+    "**Validates: Requirements 9.1, 9.2, 15.1, 15.2, 15.3, 15.4, 15.5, 15.6** — for any valid PipelineState, assembleBrief() returns a ResearchBrief with a UUID v4 id",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+          expect(brief.id).toMatch(UUID_V4_RE);
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.1, 15.2** — for any valid PipelineState, assembleBrief() returns a ResearchBrief with a positive Unix createdAt timestamp",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+          expect(typeof brief.createdAt).toBe("number");
+          expect(brief.createdAt).toBeGreaterThan(0);
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.1, 15.3** — for any valid PipelineState, assembleBrief() returns a ResearchBrief with solPrice > 0",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+          expect(typeof brief.solPrice).toBe("number");
+          expect(brief.solPrice).toBeGreaterThan(0);
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.1, 15.4** — for any valid PipelineState, assembleBrief() returns a non-empty searchResults array where each entry has non-empty title, url, and snippet",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+          expect(Array.isArray(brief.searchResults)).toBe(true);
+          expect(brief.searchResults.length).toBeGreaterThan(0);
+          for (const result of brief.searchResults) {
+            expect(result.title.trim().length).toBeGreaterThan(0);
+            expect(result.url.trim().length).toBeGreaterThan(0);
+            expect(result.snippet.trim().length).toBeGreaterThan(0);
+          }
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.1, 15.5** — for any valid PipelineState, assembleBrief() returns a non-empty analysis string",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+          expect(typeof brief.analysis).toBe("string");
+          expect(brief.analysis.trim().length).toBeGreaterThan(0);
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.1, 15.6** — for any valid PipelineState, assembleBrief() returns an imageUrl that is a valid HTTPS URL",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+          expect(typeof brief.imageUrl).toBe("string");
+          expect(brief.imageUrl.startsWith("https://")).toBe(true);
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.1, 9.2** — for any valid PipelineState, assembleBrief() returns a payments array with exactly 4 entries",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+          expect(Array.isArray(brief.payments)).toBe(true);
+          expect(brief.payments).toHaveLength(4);
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.1** — for any valid PipelineState, assembleBrief() returns a populated onChain object with ledgerTx, contentHash, and agentPda fields",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+          expect(brief.onChain).toBeDefined();
+          expect(brief.onChain).toHaveProperty("ledgerTx");
+          expect(brief.onChain).toHaveProperty("contentHash");
+          expect(brief.onChain).toHaveProperty("agentPda");
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.1, 9.2, 15.1, 15.2, 15.3, 15.4, 15.5, 15.6** — combined: for any valid PipelineState, assembleBrief() returns a fully-formed ResearchBrief satisfying all structural invariants simultaneously",
+    () => {
+      fc.assert(
+        fc.property(validPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+
+          // id: UUID v4
+          expect(brief.id).toMatch(UUID_V4_RE);
+
+          // createdAt: positive Unix timestamp
+          expect(brief.createdAt).toBeGreaterThan(0);
+
+          // solPrice: positive number
+          expect(brief.solPrice).toBeGreaterThan(0);
+
+          // searchResults: non-empty, each entry has required fields
+          expect(brief.searchResults.length).toBeGreaterThan(0);
+          for (const r of brief.searchResults) {
+            expect(r.title.trim().length).toBeGreaterThan(0);
+            expect(r.url.trim().length).toBeGreaterThan(0);
+            expect(r.snippet.trim().length).toBeGreaterThan(0);
+          }
+
+          // analysis: non-empty string
+          expect(brief.analysis.trim().length).toBeGreaterThan(0);
+
+          // imageUrl: valid HTTPS URL
+          expect(brief.imageUrl.startsWith("https://")).toBe(true);
+
+          // payments: exactly 4 entries
+          expect(brief.payments).toHaveLength(4);
+
+          // onChain: object with required fields
+          expect(brief.onChain).toHaveProperty("ledgerTx");
+          expect(brief.onChain).toHaveProperty("contentHash");
+          expect(brief.onChain).toHaveProperty("agentPda");
+        }),
+        { numRuns: 100 }
+      );
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Property 2: Three Distinct AceDataCloud APIs
+// ---------------------------------------------------------------------------
+
+/**
+ * Arbitrary that generates a valid PipelineState with all 4 payment records
+ * (sentinel + acedata-search + acedata-llm + acedata-image), each with a
+ * non-empty txHash.
+ *
+ * **Validates: Requirements 9.2, 15.7**
+ */
+const nonEmptyTxHashArb = fc
+  .string({ minLength: 1, maxLength: 88 })
+  .filter((s) => s.trim().length > 0);
+
+const nonEmptyAmountArb = fc
+  .float({ min: 0.000001, max: 10, noNaN: true })
+  .map((n) => n.toFixed(6));
+
+const briefSearchResultArb = fc.record({
+  title: fc.string({ minLength: 1, maxLength: 80 }).filter((s) => s.trim().length > 0),
+  url: fc.constant("https://example.com/result"),
+  snippet: fc.string({ minLength: 1, maxLength: 200 }).filter((s) => s.trim().length > 0),
+});
+
+const analysisArb = fc
+  .string({ minLength: 51, maxLength: 500 })
+  .filter((s) => s.trim().length > 50);
+
+const imageUrlArb = fc.constant("https://cdn.midjourney.com/test.png");
+
+const solPriceArb = fc.float({ min: 0.01, max: 10000, noNaN: true });
+
+/**
+ * Build a PipelineState that has all 4 payment records with distinct,
+ * non-empty txHashes. The state is fully populated so assembleBrief()
+ * succeeds without throwing.
+ */
+const fullPipelineStateArb = fc
+  .record({
+    sentinelTxHash: nonEmptyTxHashArb,
+    searchTxHash: nonEmptyTxHashArb,
+    llmTxHash: nonEmptyTxHashArb,
+    imageTxHash: nonEmptyTxHashArb,
+    sentinelAmount: nonEmptyAmountArb,
+    searchAmount: nonEmptyAmountArb,
+    llmAmount: nonEmptyAmountArb,
+    imageAmount: nonEmptyAmountArb,
+    solPrice: solPriceArb,
+    searchResult: briefSearchResultArb,
+    analysis: analysisArb,
+    imageUrl: imageUrlArb,
+    topic: topicArb,
+  })
+  .map(
+    ({
+      sentinelTxHash,
+      searchTxHash,
+      llmTxHash,
+      imageTxHash,
+      sentinelAmount,
+      searchAmount,
+      llmAmount,
+      imageAmount,
+      solPrice,
+      searchResult,
+      analysis,
+      imageUrl,
+      topic,
+    }) => {
+      const now = Math.floor(Date.now() / 1000);
+      const state: import("../../src/types/index.js").PipelineState = {
+        runId: "test-run-id",
+        topic,
+        stage: "persist",
+        startedAt: Date.now(),
+        results: {
+          id: "test-brief-id",
+          topic,
+          createdAt: now,
+          solPrice,
+          searchResults: [searchResult],
+          analysis,
+          imageUrl,
+          payments: [
+            {
+              service: "sentinel",
+              network: "solana",
+              amountUsdc: sentinelAmount,
+              txHash: sentinelTxHash,
+              settledAt: now,
+            },
+            {
+              service: "acedata-search",
+              network: "solana",
+              amountUsdc: searchAmount,
+              txHash: searchTxHash,
+              settledAt: now,
+            },
+            {
+              service: "acedata-llm",
+              network: "solana",
+              amountUsdc: llmAmount,
+              txHash: llmTxHash,
+              settledAt: now,
+            },
+            {
+              service: "acedata-image",
+              network: "solana",
+              amountUsdc: imageAmount,
+              txHash: imageTxHash,
+              settledAt: now,
+            },
+          ],
+        },
+        errors: [],
+      };
+      return state;
+    }
+  );
+
+describe("Property 2: Three Distinct AceDataCloud APIs", () => {
+  it(
+    "**Validates: Requirements 9.2, 15.7** — for any ResearchBrief from a successful run, brief.payments contains exactly one 'acedata-search', one 'acedata-llm', and one 'acedata-image' record, each with a non-empty txHash",
+    () => {
+      fc.assert(
+        fc.property(fullPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+
+          const aceDataServices = ["acedata-search", "acedata-llm", "acedata-image"] as const;
+
+          for (const service of aceDataServices) {
+            // Filter payments for this service
+            const records = brief.payments.filter((p) => p.service === service);
+
+            // Exactly one record per AceDataCloud service
+            expect(records).toHaveLength(1);
+
+            // The record must have a non-empty txHash
+            expect(records[0].txHash).toBeTruthy();
+            expect(records[0].txHash.trim().length).toBeGreaterThan(0);
+          }
+
+          // Total payments must be exactly 4 (sentinel + 3 acedata)
+          expect(brief.payments).toHaveLength(4);
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 9.2, 15.7** — each AceDataCloud payment record preserves the txHash from the pipeline state (no hash is lost or overwritten during assembly)",
+    () => {
+      fc.assert(
+        fc.property(fullPipelineStateArb, (state) => {
+          const brief = assembleBrief(state);
+
+          const payments = state.results.payments as import("../../src/types/index.js").PaymentRecord[];
+
+          for (const service of ["acedata-search", "acedata-llm", "acedata-image"] as const) {
+            const stateRecord = payments.find((p) => p.service === service)!;
+            const briefRecord = brief.payments.find((p) => p.service === service)!;
+
+            // txHash must be preserved exactly as-is from the pipeline state
+            expect(briefRecord.txHash).toBe(stateRecord.txHash);
+          }
+        }),
+        { numRuns: 50 }
+      );
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Property 1: Autonomy
+// ---------------------------------------------------------------------------
+
+/**
+ * **Property 1: Autonomy** — for any non-empty topic string, `agent.run(topic)`
+ * (with all dependencies mocked) completes all pipeline stages and returns a
+ * complete `ResearchBrief` without any interactive prompt or human input.
+ *
+ * **Validates: Requirements 11.1**
+ *
+ * The test verifies:
+ *  1. `run(topic)` resolves (does not throw) for any non-empty topic.
+ *  2. The returned value is a `ResearchBrief` with all required fields present
+ *     and correctly typed.
+ *  3. All 5 pipeline stages (discovery, sentinel, search, llm, image) are
+ *     invoked exactly once — confirming the pipeline ran end-to-end without
+ *     any human gate.
+ *  4. `resultPersister.persist()` is called exactly once — confirming the
+ *     on-chain persist stage also completed autonomously.
+ */
+describe("Property 1: Autonomy", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it(
+    "**Validates: Requirements 11.1** — for any non-empty topic string, agent.run(topic) completes all pipeline stages and returns a complete ResearchBrief without human input",
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          topicArb,
+          async (topic: string) => {
+            const {
+              agent,
+              toolDiscovery,
+              sentinelClient,
+              aceClient,
+              resultPersister,
+            } = buildInitializedAgent();
+
+            // Run the full pipeline — no human interaction should be required
+            const brief = await agent.run(topic);
+
+            // ── 1. Return value is a complete ResearchBrief ──────────────────
+
+            // id: non-empty string (UUID v4)
+            expect(typeof brief.id).toBe("string");
+            expect(brief.id.trim().length).toBeGreaterThan(0);
+
+            // topic: matches the input topic
+            expect(brief.topic).toBe(topic);
+
+            // createdAt: positive Unix timestamp (seconds)
+            expect(typeof brief.createdAt).toBe("number");
+            expect(brief.createdAt).toBeGreaterThan(0);
+
+            // solPrice: positive number from Sentinel
+            expect(typeof brief.solPrice).toBe("number");
+            expect(brief.solPrice).toBeGreaterThan(0);
+
+            // searchResults: non-empty array, each entry has title/url/snippet
+            expect(Array.isArray(brief.searchResults)).toBe(true);
+            expect(brief.searchResults.length).toBeGreaterThan(0);
+            for (const r of brief.searchResults) {
+              expect(typeof r.title).toBe("string");
+              expect(r.title.trim().length).toBeGreaterThan(0);
+              expect(typeof r.url).toBe("string");
+              expect(r.url.trim().length).toBeGreaterThan(0);
+              expect(typeof r.snippet).toBe("string");
+              expect(r.snippet.trim().length).toBeGreaterThan(0);
+            }
+
+            // analysis: non-empty string
+            expect(typeof brief.analysis).toBe("string");
+            expect(brief.analysis.trim().length).toBeGreaterThan(0);
+
+            // imageUrl: valid HTTPS URL
+            expect(typeof brief.imageUrl).toBe("string");
+            expect(brief.imageUrl.startsWith("https://")).toBe(true);
+
+            // payments: exactly 4 records
+            expect(Array.isArray(brief.payments)).toBe(true);
+            expect(brief.payments).toHaveLength(4);
+
+            // onChain: populated object
+            expect(brief.onChain).toBeDefined();
+            expect(typeof brief.onChain.ledgerTx).toBe("string");
+            expect(brief.onChain.ledgerTx.trim().length).toBeGreaterThan(0);
+            expect(typeof brief.onChain.contentHash).toBe("string");
+            expect(typeof brief.onChain.agentPda).toBe("string");
+
+            // ── 2. All pipeline stages were invoked (no human gate) ──────────
+
+            // discovery stage
+            expect(toolDiscovery.findSentinel).toHaveBeenCalledTimes(1);
+
+            // sentinel stage
+            expect(sentinelClient.getPythPrice).toHaveBeenCalledTimes(1);
+            expect(sentinelClient.getPythPrice).toHaveBeenCalledWith("SOL/USD");
+
+            // search stage
+            expect(aceClient.search).toHaveBeenCalledTimes(1);
+            expect(aceClient.search).toHaveBeenCalledWith(topic);
+
+            // llm stage
+            expect(aceClient.chat).toHaveBeenCalledTimes(1);
+
+            // image stage
+            expect(aceClient.generateImage).toHaveBeenCalledTimes(1);
+
+            // persist stage
+            expect(resultPersister.persist).toHaveBeenCalledTimes(1);
+          }
+        ),
+        { numRuns: 20 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 11.1** — agent.run(topic) is fully autonomous: it does not block on any interactive prompt (resolves within a reasonable timeout)",
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          topicArb,
+          async (topic: string) => {
+            const { agent } = buildInitializedAgent();
+
+            // The run must complete without any blocking/interactive step.
+            // We wrap in a race with a generous timeout to catch any accidental
+            // blocking behaviour (e.g. readline, process.stdin reads).
+            const TIMEOUT_MS = 5_000;
+
+            const runPromise = agent.run(topic);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error(`agent.run() did not resolve within ${TIMEOUT_MS}ms — possible blocking/interactive prompt`)),
+                TIMEOUT_MS
+              )
+            );
+
+            // Must resolve before the timeout — no human input required
+            const brief = await Promise.race([runPromise, timeoutPromise]);
+
+            expect(brief).toBeDefined();
+            expect(brief.topic).toBe(topic);
+          }
+        ),
+        { numRuns: 10 }
+      );
+    }
+  );
+
+  it(
+    "**Validates: Requirements 11.1** — agent.run(topic) returns a ResearchBrief whose payments array contains all four required service records",
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          topicArb,
+          async (topic: string) => {
+            const { agent } = buildInitializedAgent();
+
+            const brief = await agent.run(topic);
+
+            const requiredServices = [
+              "sentinel",
+              "acedata-search",
+              "acedata-llm",
+              "acedata-image",
+            ] as const;
+
+            for (const service of requiredServices) {
+              const records = brief.payments.filter((p) => p.service === service);
+              expect(records).toHaveLength(1);
+              expect(records[0].txHash.trim().length).toBeGreaterThan(0);
+              expect(records[0].network).toBe("solana");
+            }
+          }
+        ),
+        { numRuns: 20 }
+      );
     }
   );
 });

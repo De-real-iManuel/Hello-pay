@@ -12,9 +12,10 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
 import { randomUUID } from "crypto";
-// SapConnection is imported dynamically to avoid subpath resolution issues
-// with moduleResolution: "bundler". The high-level client is typed as `any`
-// following the same pattern as SapRegistrar, ToolDiscovery, and SentinelClient.
+import { createRequire as _createRequire } from "module";
+const _require = _createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const { SapConnection } = _require("@oobe-protocol-labs/synapse-sap-sdk/core/connection") as any;
 import { loadKeypair } from "../utils/keypair.js";
 // retry.ts is used indirectly via withSelectiveRetry below
 import {
@@ -173,9 +174,7 @@ export class BountyAgent {
     const keypair = loadKeypair(this.config.walletKeypairPath);
 
     // Step 2: Create SapClient (Requirement 1.2)
-    // Dynamic import to avoid subpath resolution issues with moduleResolution: "bundler"
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { SapConnection } = await import("@oobe-protocol-labs/synapse-sap-sdk/dist/esm/core/connection.js" as any);
+    // SapConnection loaded at module top via createRequire (bypasses exports map)
     const { client, connection: sapConn } = SapConnection.fromKeypair(
       this.config.solanaRpcUrl,
       keypair
@@ -214,7 +213,8 @@ export class BountyAgent {
     this.aceClient = new AceDataCloudClient(
       keypair,
       this.config.aceDataCloudBaseUrl,
-      this.config.facilitatorUrl
+      this.config.facilitatorUrl,
+      this.config.solanaRpcUrl
     );
 
     // Step 6: Register on SAP (Requirement 2.5)

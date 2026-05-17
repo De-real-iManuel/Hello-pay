@@ -42,7 +42,7 @@ import type { SearchResult, ImageResult, ChatMessage } from "../types/index.js";
 class SolanaKeypairWallet implements SolanaWalletAdapter {
   readonly publicKey: { toBase58(): string; toString(): string };
 
-  constructor(private readonly keypair: Keypair) {
+  constructor(private readonly keypair: Keypair, private readonly rpcUrl: string) {
     this.publicKey = keypair.publicKey;
   }
 
@@ -58,12 +58,8 @@ class SolanaKeypairWallet implements SolanaWalletAdapter {
     // Sign the transaction with the agent's keypair
     transaction.sign(this.keypair);
 
-    // Determine RPC URL from the transaction's recentBlockhash context.
-    // The x402-client sets tx.feePayer and recentBlockhash before calling us,
-    // but does not pass the rpcUrl here — use mainnet-beta as the default.
-    // The actual rpcUrl from the payment requirement is used by signSolanaPayment
-    // to fetch the blockhash; we submit to the same cluster.
-    const rpcUrl = "https://api.mainnet-beta.solana.com";
+    // Determine RPC URL from the configured endpoint (passed via constructor)
+    const rpcUrl = this.rpcUrl;
     const connection = new Connection(rpcUrl, "confirmed");
 
     const signature = await connection.sendRawTransaction(
@@ -112,10 +108,11 @@ export class AceDataCloudClient {
   constructor(
     keypair: Keypair,
     baseUrl: string,
-    facilitatorUrl: string
+    facilitatorUrl: string,
+    rpcUrl: string
   ) {
     // Step 1: Wrap the Keypair as a SolanaWalletAdapter (Requirement 8.3)
-    const solanaWallet = new SolanaKeypairWallet(keypair);
+    const solanaWallet = new SolanaKeypairWallet(keypair, rpcUrl);
 
     // Step 2: Create the single shared x402 payment handler (Requirement 8.7)
     // The handler is configured for the Solana network and routes all

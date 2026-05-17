@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { BountyAgent } from '../../src/agent/BountyAgent.js';
+import { BountyAgent, buildImagePrompt } from '../../src/agent/BountyAgent.js';
 import {
   DuplicateRunError,
   InsufficientFundsError,
@@ -512,5 +512,83 @@ describe('BountyAgent', () => {
       // We verify shutdown() resolves without throwing
       await expect(agent.shutdown()).resolves.toBeUndefined();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildImagePrompt() unit tests
+// Requirements: 7.6
+// ---------------------------------------------------------------------------
+
+describe('buildImagePrompt()', () => {
+  it('returns a non-empty string', () => {
+    const result = buildImagePrompt('Solana DeFi', 'DeFi protocols are growing rapidly on Solana.');
+    expect(result).toBeTruthy();
+    expect(typeof result).toBe('string');
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it('incorporates the topic into the prompt', () => {
+    const topic = 'Solana DeFi yield strategies';
+    const result = buildImagePrompt(topic, 'Analysis of yield farming protocols.');
+    expect(result).toContain('Solana DeFi yield strategies');
+  });
+
+  it('incorporates key themes from the analysis text', () => {
+    const analysis = 'Yield farming protocols are dominating the DeFi landscape. Secondary sentence here.';
+    const result = buildImagePrompt('DeFi', analysis);
+    // The first sentence (up to 80 chars) should appear in the prompt
+    expect(result).toContain('Yield farming protocols are dominating the DeFi landscape');
+  });
+
+  it('returns a Midjourney-style prompt with style parameters', () => {
+    const result = buildImagePrompt('blockchain', 'Blockchain technology is evolving fast.');
+    // Must include Midjourney style parameters
+    expect(result).toContain('--ar 16:9');
+    expect(result).toContain('--style raw');
+  });
+
+  it('produces a concise prompt (not excessively long)', () => {
+    const longTopic = 'A'.repeat(200);
+    const longAnalysis = 'B'.repeat(500) + '. Second sentence.';
+    const result = buildImagePrompt(longTopic, longAnalysis);
+    // Topic is truncated to 100 chars, analysis hint to 80 chars — total should be reasonable
+    expect(result.length).toBeLessThan(500);
+  });
+
+  it('strips control characters from the topic', () => {
+    const topicWithControls = 'Solana\x00\x1F DeFi\x7F';
+    const result = buildImagePrompt(topicWithControls, 'Analysis text here.');
+    expect(result).not.toContain('\x00');
+    expect(result).not.toContain('\x1F');
+    expect(result).not.toContain('\x7F');
+    expect(result).toContain('Solana');
+    expect(result).toContain('DeFi');
+  });
+
+  it('handles empty analysis gracefully', () => {
+    const result = buildImagePrompt('Solana', '');
+    expect(result).toBeTruthy();
+    expect(result).toContain('Solana');
+    // Should still include style parameters even with empty analysis
+    expect(result).toContain('--ar 16:9');
+  });
+
+  it('uses only the first sentence of the analysis', () => {
+    const analysis = 'First sentence about blockchain. Second sentence about DeFi. Third sentence.';
+    const result = buildImagePrompt('crypto', analysis);
+    // First sentence content should appear
+    expect(result).toContain('First sentence about blockchain');
+    // Second sentence should NOT appear (it's beyond the first sentence boundary)
+    expect(result).not.toContain('Second sentence about DeFi');
+  });
+
+  it('truncates topic to 100 characters', () => {
+    const longTopic = 'X'.repeat(150);
+    const result = buildImagePrompt(longTopic, 'Some analysis.');
+    // The topic portion should be at most 100 chars
+    const topicInPrompt = 'X'.repeat(100);
+    expect(result).toContain(topicInPrompt);
+    expect(result).not.toContain('X'.repeat(101));
   });
 });
